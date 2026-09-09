@@ -24,8 +24,8 @@ canvas.height = 600;
 
 function applyDisplaySize() {
     if (isiPhone) {
-        canvas.style.width = "60vw";
-        canvas.style.height = "50vw";
+        canvas.style.width = "100vw";
+        canvas.style.height = "100vw";
     } else {
         canvas.style.width = "1200px";
         canvas.style.height = "600px";

@@ -24,12 +24,13 @@ canvas.height = 600;
 function applyDisplaySize() {
     if (isiPhone) {
         canvas.style.width = "100vw";
-        canvas.style.height = "50vw";
+        canvas.style.height = "100vh";   // ★ 50vw → 100vh に変更
     } else {
         canvas.style.width = "1200px";
         canvas.style.height = "600px";
     }
 }
+
 applyDisplaySize();
 window.addEventListener("resize", applyDisplaySize);
 
@@ -631,28 +632,52 @@ function drawPlay() {
         );
     });
 
-    /* ★ 同時押しノーツを線で結ぶ */
-    for (let i = 0; i < notes.length; i++) {
-        const n1 = notes[i];
-        if (!n1.active || n1.judged) continue;
+    /* ★ 同時押しノーツを光るラインで結ぶ */
+for (let i = 0; i < notes.length; i++) {
+    const n1 = notes[i];
+    if (!n1.active || n1.judged) continue;
 
-        for (let j = i + 1; j < notes.length; j++) {
-            const n2 = notes[j];
-            if (!n2.active || n2.judged) continue;
+    for (let j = i + 1; j < notes.length; j++) {
+        const n2 = notes[j];
+        if (!n2.active || n2.judged) continue;
 
-            // ★ 同時押し判定：time が同じ & 左右
-            if (n1.time === n2.time && n1.lane !== n2.lane) {
+        // ★ 同時押し判定：time が同じ & 左右
+        if (n1.time === n2.time && n1.lane !== n2.lane) {
 
-                ctx.strokeStyle = "rgba(255,255,255,0.5)";
-                ctx.lineWidth = 4;
+            const x1 = laneX[n1.lane];
+            const y1 = n1.y;
+            const x2 = laneX[n2.lane];
+            const y2 = n2.y;
 
-                ctx.beginPath();
-                ctx.moveTo(laneX[n1.lane], n1.y);
-                ctx.lineTo(laneX[n2.lane], n2.y);
-                ctx.stroke();
-            }
+            /* ★ 発光グラデーション */
+            const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+            grad.addColorStop(0, "rgba(255,255,255,0.9)");
+            grad.addColorStop(0.5, "rgba(0,200,255,1.0)");   // 中央を光らせる
+            grad.addColorStop(1, "rgba(255,255,255,0.9)");
+
+            /* ★ 外側の光（ぼかし） */
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 10;  // 光の太さ
+            ctx.globalAlpha = 0.4;
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            /* ★ 内側の本線（シャープな線） */
+            ctx.strokeStyle = "rgba(255,255,255,1.0)";
+            ctx.lineWidth = 4;
+            ctx.globalAlpha = 1.0;
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
         }
     }
+}
+
 
     /* 爆発エフェクト */
     noteBursts.forEach(b => {

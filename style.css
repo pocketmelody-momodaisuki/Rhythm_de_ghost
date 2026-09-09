@@ -7,22 +7,20 @@ html, body {
   touch-action: none;
 }
 
-/* PC用（縮まない） */
+canvas {
+  display: block;
+}
+
+/* PC用 */
 @media (min-width: 800px) {
   canvas {
-    width: 800px;
-    height: 400px;
-    display: block;
+    width: 1200px;
+    height: 600px;
     margin: 0 auto;
   }
 }
 
-canvas {
-  display: block;
-  touch-action: none;
-}
-
-/* iPhone用（横幅フィット） */
+/* iPhone / iPad 用 */
 @media (max-width: 799px) {
   html, body {
     overscroll-behavior: none;
@@ -32,7 +30,6 @@ canvas {
 
   canvas {
     width: 100vw;
-    height: 50vw; /* 800x400 の比率（2:1） */
-    display: block;
+    height: 50vw; /* 1200x600 の比率（2:1） */
   }
 }

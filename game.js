@@ -96,7 +96,7 @@ const judgeColors = {
 ------------------------------ */
 const difficultySettings = {
     easy:   1.0,
-    hard:   0.5
+    hard:   0.75
 };
 
 /* ------------------------------

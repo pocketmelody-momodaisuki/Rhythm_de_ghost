@@ -2,14 +2,11 @@ html, body {
   margin: 0;
   padding: 0;
   background: black;
-}
-
-  /* Safari のスクロール・リフレッシュを完全停止 */
   overscroll-behavior: none;
   overflow: hidden;
   touch-action: none;
+}
 
-  background: black; /* ← 背景が白くなるのを防ぐ */
 /* PC用（縮まない） */
 @media (min-width: 800px) {
   canvas {
@@ -23,6 +20,8 @@ html, body {
 canvas {
   display: block;
   touch-action: none;
+}
+
 /* iPhone用（横幅フィット） */
 @media (max-width: 799px) {
   html, body {
@@ -32,8 +31,8 @@ canvas {
   }
 
   canvas {
-    width: 100vw;       /* 横幅にフィット */
-    height: 50vw;       /* 800x400 の比率（2:1） */
+    width: 100vw;
+    height: 50vw; /* 800x400 の比率（2:1） */
     display: block;
   }
 }

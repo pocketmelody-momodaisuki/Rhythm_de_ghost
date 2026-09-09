@@ -1,6 +1,5 @@
 /* ============================================================
-   Rhythm de Ghost - BPM Auto Chart Version + Life Gauge
-   難易度：Easy / Hard（旧 Normal の密度を Hard に）
+   Rhythm de Ghost - Long Note Full Version (2026/09/09)
 ============================================================ */
 
 /* ------------------------------
@@ -24,23 +23,28 @@ canvas.height = 600;
 
 function applyDisplaySize() {
     if (isiPhone) {
-        canvas.style.width = "60vw";
-        canvas.style.height = "30vw";
+
+        const isPortrait = window.innerHeight > window.innerWidth;
+
+        if (isPortrait) {
+            /* ★縦向き：vh を使う（vw は小さすぎる） */
+            canvas.style.width  = "95vw";   // 画面いっぱい
+            canvas.style.height = "70vh";   // 高さを大きく
+        } else {
+            /* ★横向き：もっと大きくしてOK */
+            canvas.style.width  = "95vw";   // ほぼ全幅
+            canvas.style.height = "55vw";   // 今より大きい
+        }
+
     } else {
+        /* PC */
         canvas.style.width = "1200px";
         canvas.style.height = "600px";
     }
 }
+
 applyDisplaySize();
 window.addEventListener("resize", applyDisplaySize);
-
-function getPointerPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-        x: (e.clientX - rect.left) * (canvas.width / rect.width),
-        y: (e.clientY - rect.top) * (canvas.height / rect.height)
-    };
-}
 
 /* ------------------------------
    音楽
@@ -50,13 +54,13 @@ const bgm = document.getElementById("bgm");
 /* ------------------------------
    ゲーム状態
 ------------------------------ */
-let gameState = "title"; 
-let selectedSongIndex = null;
+let gameState = "title";
+let selectedSongIndex = 0;
 let selectSongCursor = 0;
 let selectDifficultyCursor = 0;
 
 /* ------------------------------
-   ノーツ画像（左右別）
+   ノーツ画像
 ------------------------------ */
 const ghostLeftImg = new Image();
 ghostLeftImg.src = "ghost_left.png";
@@ -92,34 +96,23 @@ const judgeColors = {
 };
 
 /* ------------------------------
-   難易度設定（2種類）
-   Hard = 旧 Normal の密度（0.5）
+   難易度設定
 ------------------------------ */
 const difficultySettings = {
-    easy:   1.0,
-    hard:   0.5
+    easy: 1.0,
+    hard: 0.5
 };
 
 /* ------------------------------
    曲データ
 ------------------------------ */
 const songs = [
-    {
-        title: "Ghost Waltz",
-        file: "music1.mp3",
-        bpm: 152,
-        length: 108
-    },
-    {
-        title: "Haunted Beat",
-        file: "music2.mp3",
-        bpm: 77,
-        length: 90
-    }
+    { title: "Ghost Waltz", file: "music1.mp3", bpm: 152, length: 108 },
+    { title: "Haunted Beat", file: "music2.mp3", bpm: 77, length: 90 }
 ];
 
 /* ------------------------------
-   ノーツ・ゲーム変数
+   ゲーム変数
 ------------------------------ */
 let notes = [];
 let gameTime = 0;
@@ -127,8 +120,8 @@ let score = 0;
 let combo = 0;
 let maxCombo = 0;
 
-let life = 100;        // ★体力ゲージ
-let gameOver = false;  // ★ゲームオーバー判定
+let life = 100;
+let gameOver = false;
 
 let lastJudgeText = "";
 let lastJudgeTimer = 0;
@@ -146,53 +139,227 @@ let judgeWaveRight = 0;
 let judgeTextScale = 0;
 
 let noteBursts = [];
+
 /* ============================================================
-   BPM → ノーツ自動生成（Easy / Hard）
+   BPM → ノーツ自動生成（long ノーツ含む）
 ============================================================ */
 function generateChartFromBPM(bpm, songLength, difficulty) {
     const beatSec = 60 / bpm;
-    const interval = beatSec * difficultySettings[difficulty];  
+    const interval = beatSec * difficultySettings[difficulty];
     const chart = [];
 
     let t = 0;
+    let holdUntil = -1;   // ★長押し中の時間を記録（この間はノーツ禁止）
+
     while (t < songLength) {
-        const lane = Math.random() < 0.5 ? "left" : "right";
-        chart.push({ time: t, lane });
+
+        // ★長押し中は単ノーツを生成しない
+        if (t < holdUntil) {
+            t += interval;
+            continue;
+        }
+
+        const r = Math.random();
+
+        /* ------------------------------------------------------------
+           ★長押しは「たまにしか来ない」ように確率を下げる
+           r < 0.10 → 10% の確率で長押し
+        ------------------------------------------------------------ */
+        if (r < 0.10) {
+            const lane = Math.random() < 0.5 ? "left" : "right";
+            const holdLen = beatSec * 2;   // 2拍ぶんの長押し
+
+            chart.push({
+                type: "long",
+                lane,
+                start: t,
+                end: t + holdLen
+            });
+
+            holdUntil = t + holdLen;   // ★この時間までは単ノーツ禁止
+        }
+
+        /* ------------------------------------------------------------
+           ★長押し中でなければ通常ノーツを生成
+        ------------------------------------------------------------ */
+        else {
+            const lane = Math.random() < 0.5 ? "left" : "right";
+            chart.push({
+                type: "tap",
+                lane,
+                time: t
+            });
+        }
+
         t += interval;
     }
+
     return chart;
 }
 
 /* ============================================================
-   判定処理（ライフ増減を含む）
+   long ノーツを 3 つに分解
+============================================================ */
+function convertChartToNotes(chart) {
+    notes = [];
+
+    chart.forEach(c => {
+
+        if (c.type === "tap") {
+            notes.push({
+                type: "tap",
+                lane: c.lane,
+                time: c.time,
+                y: -50,
+                active: false,
+                judged: false
+            });
+        }
+
+        if (c.type === "long") {
+
+            notes.push({
+                type: "longStart",
+                lane: c.lane,
+                time: c.start,
+                y: -50,
+                active: false,
+                judged: false
+            });
+
+            notes.push({
+                type: "longBar",
+                lane: c.lane,
+                start: c.start,
+                end: c.end,
+                y: -50,
+                active: false
+            });
+
+            notes.push({
+                type: "longEnd",
+                lane: c.lane,
+                time: c.end,
+                y: -50,
+                active: false,
+                judged: false
+            });
+        }
+    });
+}
+
+/* ============================================================
+   判定処理（longStart / tap）
 ============================================================ */
 function handleInput(lane) {
     if (gameState !== "play") return;
 
+    let target = notes.find(n =>
+        (n.type === "tap" || n.type === "longStart") &&
+        n.lane === lane &&
+        n.active &&
+        !n.judged &&
+        Math.abs(n.y - judgeLineY) < 120
+    );
+
+    if (!target) return;
+
+    const diff = Math.abs(target.y - judgeLineY);
+
+    let judge = "Miss!";
+    let addScore = 0;
+
+    for (const w of judgeWindows) {
+        if (diff <= w.limit) {
+            judge = w.name;
+            addScore = w.score;
+            break;
+        }
+    }
+
+    target.judged = true;
+    target.y = judgeLineY + 200;
+
+    score += addScore;
+    lastJudgeText = judge;
+    lastJudgeTimer = 60;
+    lastJudgeLane = lane;
+    judgeTextScale = 10;
+
+    if (lane === "left") {
+        lastJudgeColorLeft = judgeColors[judge];
+        judgeFlashLeft = judgeScaleLeft = judgeWaveLeft = 10;
+    } else {
+        lastJudgeColorRight = judgeColors[judge];
+        judgeFlashRight = judgeScaleRight = judgeWaveRight = 10;
+    }
+
+    noteBursts.push({ x: laneX[lane], y: judgeLineY, timer: 10 });
+
+    if (judge === "Perfect!") life += 2;
+    else if (judge === "Good!") life -= 10;
+    else if (judge === "Bad!") life -= 20;
+    else if (judge === "Miss!") life -= 30;
+
+    if (judge === "Perfect!" || judge === "Great!") {
+        combo++;
+        life += 1;
+        maxCombo = Math.max(maxCombo, combo);
+    } else {
+        combo = 0;
+    }
+
+    if (life > 100) life = 100;
+
+    if (life <= 0) {
+        life = 0;
+        gameOver = true;
+        bgm.pause();
+        bgm.currentTime = 0;
+        gameState = "result";
+    }
+}
+
+/* ============================================================
+   keyup → longEnd 判定
+============================================================ */
+document.addEventListener("keyup", e => {
+
+    if (gameState !== "play") return;
+
+    let lane = null;
+    if (e.code === "Space") lane = "left";
+    if (e.code === "Enter") lane = "right";
+    if (!lane) return;
+
+    /* ------------------------------------------------------------
+       ★ longEnd 判定（巻き込み防止版）
+    ------------------------------------------------------------ */
+    let endNotes = notes.filter(n =>
+        n.type === "longEnd" &&
+        n.lane === lane &&
+        n.active &&
+        !n.judged
+    );
+
+    if (endNotes.length === 0) return;
+
+    // ★最も近い longEnd を選ぶ（tap を巻き込まない）
     let bestNote = null;
     let bestDiff = Infinity;
 
-    // 最も近いノーツを探す
-    notes.forEach(note => {
-        if (note.lane !== lane) return;
-        if (!note.active) return;
-        if (note.judged) return;
-
-        const dx = laneX[lane] - laneX[note.lane];
-        const dy = judgeLineY - note.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-
-        if (distance > 60) return;
-
-        if (distance < bestDiff) {
-            bestDiff = distance;
-            bestNote = note;
+    endNotes.forEach(n => {
+        const diff = Math.abs(n.y - judgeLineY);
+        if (diff < bestDiff) {
+            bestDiff = diff;
+            bestNote = n;
         }
     });
 
-    if (!bestNote) return;
+    // ★判定範囲を狭める（巻き込み防止）
+    if (bestDiff > 60) return;
 
-    /* 判定判定 */
+    /* 判定処理 */
     let judge = "Miss!";
     let addScore = 0;
 
@@ -211,81 +378,51 @@ function handleInput(lane) {
     lastJudgeText = judge;
     lastJudgeTimer = 60;
     lastJudgeLane = lane;
-
     judgeTextScale = 10;
 
-    /* 判定円の色を保存（判定文字の色に使う） */
     if (lane === "left") {
         lastJudgeColorLeft = judgeColors[judge];
-        judgeFlashLeft = 10;
-        judgeScaleLeft = 10;
-        judgeWaveLeft = 10;
+        judgeFlashLeft = judgeScaleLeft = judgeWaveLeft = 10;
     } else {
         lastJudgeColorRight = judgeColors[judge];
-        judgeFlashRight = 10;
-        judgeScaleRight = 10;
-        judgeWaveRight = 10;
+        judgeFlashRight = judgeScaleRight = judgeWaveRight = 10;
     }
 
-    /* 爆発エフェクト */
-    noteBursts.push({
-        x: laneX[lane],
-        y: judgeLineY,
-        timer: 10
-    });
+    if (judge === "Perfect!") life += 2;
+    else if (judge === "Good!") life -= 10;
+    else if (judge === "Bad!") life -= 20;
+    else if (judge === "Miss!") life -= 30;
 
-    /* ============================================================
-       ★ ライフゲージ増減
-    ============================================================ */
-    if (judge === "Perfect!") {
-        life += 2;
-    } else if (judge === "Great!") {
-        // ±0
-    } else if (judge === "Good!") {
-        life -= 10;
-    } else if (judge === "Bad!") {
-        life -= 20;
-    } else if (judge === "Miss!") {
-        life -= 30;
-    }
-
-    /* コンボ継続ボーナス（Perfect / Great のときのみ） */
     if (judge === "Perfect!" || judge === "Great!") {
         combo++;
-        life += 1;  // コンボボーナス
-        if (combo > maxCombo) maxCombo = combo;
+        life += 1;
+        maxCombo = Math.max(maxCombo, combo);
     } else {
         combo = 0;
     }
 
-    /* ライフ上限 */
     if (life > 100) life = 100;
 
-/* ★ ライフが0以下ならゲームオーバー */
     if (life <= 0) {
         life = 0;
         gameOver = true;
-
-        /* ★ 曲を止める（重要） */
         bgm.pause();
         bgm.currentTime = 0;
-
         gameState = "result";
     }
+});
 
-}
+
 /* ============================================================
-   入力処理（キーボード）
+   キー入力（画面遷移）
 ============================================================ */
 document.addEventListener("keydown", e => {
 
-    /* タイトル → 曲選択 */
     if (gameState === "title") {
         gameState = "selectSong";
         return;
     }
 
-    /* 曲選択 */
     if (gameState === "selectSong") {
         if (e.code === "ArrowUp") selectSongCursor = Math.max(0, selectSongCursor - 1);
         if (e.code === "ArrowDown") selectSongCursor = Math.min(songs.length - 1, selectSongCursor + 1);
@@ -297,7 +434,6 @@ document.addEventListener("keydown", e => {
         return;
     }
 
-    /* 難易度選択（Easy / Hard） */
     if (gameState === "selectDifficulty") {
         if (e.code === "ArrowUp") selectDifficultyCursor = Math.max(0, selectDifficultyCursor - 1);
         if (e.code === "ArrowDown") selectDifficultyCursor = Math.min(1, selectDifficultyCursor + 1);
@@ -309,42 +445,34 @@ document.addEventListener("keydown", e => {
         return;
     }
 
-    /* プレイ中の判定入力 */
     if (gameState === "play") {
         if (e.code === "Space") handleInput("left");
         if (e.code === "Enter") handleInput("right");
+        return;
     }
 
-    /* リザルト → タイトルへ */
     if (gameState === "result") {
-
-        /* ★ 判定色リセット */
         lastJudgeColorLeft = "white";
         lastJudgeColorRight = "white";
-
-        /* ★ 判定文字リセット */
         lastJudgeText = "";
         lastJudgeTimer = 0;
         judgeTextScale = 0;
-
         gameState = "title";
+        return;
     }
-
 });
 
 /* ============================================================
-   pointer入力（スマホ／PCクリック）
+   pointer入力
 ============================================================ */
 canvas.addEventListener("pointerdown", e => {
     const pos = getPointerPos(e);
 
-    /* タイトル → 曲選択 */
     if (gameState === "title") {
         gameState = "selectSong";
         return;
     }
 
-    /* 曲選択 */
     if (gameState === "selectSong") {
         const index = Math.floor((pos.y - 220) / 60);
         if (index >= 0 && index < songs.length) {
@@ -354,7 +482,6 @@ canvas.addEventListener("pointerdown", e => {
         return;
     }
 
-    /* 難易度選択（Easy / Hard） */
     if (gameState === "selectDifficulty") {
         const index = Math.floor((pos.y - 220) / 60);
         if (index >= 0 && index < 2) {
@@ -364,22 +491,22 @@ canvas.addEventListener("pointerdown", e => {
         return;
     }
 
-    /* プレイ中の判定入力（左右タップ） */
     if (gameState === "play") {
         const rect = canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left);
         if (x < rect.width / 2) handleInput("left");
         else handleInput("right");
+        return;
     }
 
-    /* リザルト → タイトルへ */
     if (gameState === "result") {
         gameState = "title";
+        return;
     }
 });
 
 /* ============================================================
-   ゲーム開始（Easy / Hard）
+   ゲーム開始
 ============================================================ */
 function startGame(difficulty) {
     const song = songs[selectedSongIndex];
@@ -389,29 +516,20 @@ function startGame(difficulty) {
     bgm.play();
 
     const chart = generateChartFromBPM(song.bpm, song.length, difficulty);
-
-    notes = chart.map(c => ({
-        lane: c.lane,
-        time: c.time,
-        y: -50,
-        active: false,
-        judged: false
-    }));
+    convertChartToNotes(chart);
 
     score = 0;
     combo = 0;
     maxCombo = 0;
 
-    life = 60;
+    life = 100;
     gameOver = false;
 
     gameTime = 0;
 
-    /* ★ 判定円の色を白にリセット */
     lastJudgeColorLeft = "white";
     lastJudgeColorRight = "white";
 
-    /* ★ 判定文字もリセット */
     lastJudgeText = "";
     lastJudgeTimer = 0;
     judgeTextScale = 0;
@@ -419,103 +537,164 @@ function startGame(difficulty) {
     gameState = "play";
 }
 
-
 /* ============================================================
    更新処理
 ============================================================ */
 function update() {
-    if (gameState === "play") {
+    if (gameState !== "play") return;
 
-        gameTime = bgm.currentTime;
+    gameTime = bgm.currentTime;
 
-        /* 曲終了 → リザルトへ */
-        if (bgm.ended) {
-            gameState = "result";
-            return;
-        }
+    if (bgm.ended) {
+        gameState = "result";
+        return;
+    }
 
-        /* ノーツ落下処理 */
-        notes.forEach(note => {
+    notes.forEach(note => {
 
-            /* 判定ラインに近づいたら active にする */
-            if (!note.active && gameTime >= note.time - 1.0) {
+        /* ★active 化（longBar の start / end も対応） */
+        if (!note.active) {
+            if (note.time !== undefined && gameTime >= note.time - 1.0) {
                 note.active = true;
                 note.y = -50;
             }
-
-            /* 落下 */
-            if (note.active && !note.judged) {
-                note.y += 4;
-
-                /* 判定ラインを過ぎたら Miss 扱い */
-                if (note.y > judgeLineY + 120) {
-                    note.judged = true;
-
-                        /* ★ MISS 判定文字を出す */
-                        lastJudgeText = "Miss!";
-                        lastJudgeTimer = 60;
-                        lastJudgeLane = note.lane;  // 左右どちらのレーンでMISSしたか
-                        judgeTextScale = 10;
-
-                        /* ★ 判定円の色もMiss色にする */
-                        if (note.lane === "left") {
-                            lastJudgeColorLeft = judgeColors["Miss!"];
-                            judgeFlashLeft = 10;
-                            judgeScaleLeft = 10;
-                            judgeWaveLeft = 10;
-                        } else {
-                            lastJudgeColorRight = judgeColors["Miss!"];
-                            judgeFlashRight = 10;
-                            judgeScaleRight = 10;
-                            judgeWaveRight = 10;
-                        }
-
-                        /* ★ MISSダメージ */
-                        life -= 15;
-
-                        if (life <= 0) {
-                            life = 0;
-                            gameOver = true;
-
-                            bgm.pause();
-                            bgm.currentTime = 0;
-
-                            gameState = "result";
-                        }
-                    }
-                                    
+            if (note.start !== undefined && gameTime >= note.start - 1.0) {
+                note.active = true;
+                note.y = -50;
             }
-        });
+            if (note.end !== undefined && gameTime >= note.end - 1.0) {
+                note.active = true;
+                note.y = -50;
+            }
+        }
 
-        /* 判定エフェクトの減衰 */
-        if (lastJudgeTimer > 0) lastJudgeTimer--;
+        if (note.active) {
+            note.y += 4;
+        }
 
-        judgeFlashLeft = Math.max(0, judgeFlashLeft - 1);
-        judgeFlashRight = Math.max(0, judgeFlashRight - 1);
-        judgeScaleLeft = Math.max(0, judgeScaleLeft - 1);
-        judgeScaleRight = Math.max(0, judgeScaleRight - 1);
-        judgeWaveLeft = Math.max(0, judgeWaveLeft - 1);
-        judgeWaveRight = Math.max(0, judgeWaveRight - 1);
+        if (!note.judged && note.type !== "longBar" && note.y > judgeLineY + 120) {
 
-        /* 爆発エフェクト */
-        noteBursts.forEach(b => b.timer--);
-        noteBursts = noteBursts.filter(b => b.timer > 0);
+            note.judged = true;
 
-        /* 判定文字の縮小 */
-        judgeTextScale = Math.max(0, judgeTextScale - 1);
+            lastJudgeText = "Miss!";
+            lastJudgeTimer = 60;
+            lastJudgeLane = note.lane;
+            judgeTextScale = 10;
+
+            if (note.lane === "left") {
+                lastJudgeColorLeft = judgeColors["Miss!"];
+                judgeFlashLeft = judgeScaleLeft = judgeWaveLeft = 10;
+            } else {
+                lastJudgeColorRight = judgeColors["Miss!"];
+                judgeFlashRight = judgeScaleRight = judgeWaveRight = 10;
+            }
+
+            life -= 15;
+
+            if (life <= 0) {
+                life = 0;
+                gameOver = true;
+                bgm.pause();
+                bgm.currentTime = 0;
+                gameState = "result";
+            }
+        }
+    });
+
+    if (lastJudgeTimer > 0) lastJudgeTimer--;
+
+    judgeFlashLeft = Math.max(0, judgeFlashLeft - 1);
+    judgeFlashRight = Math.max(0, judgeFlashRight - 1);
+    judgeScaleLeft = Math.max(0, judgeScaleLeft - 1);
+    judgeScaleRight = Math.max(0, judgeScaleRight - 1);
+    judgeWaveLeft = Math.max(0, judgeWaveLeft - 1);
+    judgeWaveRight = Math.max(0, judgeWaveRight - 1);
+
+    noteBursts.forEach(b => b.timer--);
+    noteBursts = noteBursts.filter(b => b.timer > 0);
+
+    judgeTextScale = Math.max(0, judgeTextScale - 1);
+    /* ------------------------------------------------------------
+   ★ longBar 中の押しっぱなし判定
+------------------------------------------------------------ */
+notes.forEach(note => {
+
+    if (note.type === "longBar" && note.active && !note.judged) {
+
+        // longStart を探す
+        const startNote = notes.find(n =>
+            n.type === "longStart" &&
+            n.lane === note.lane &&
+            n.start === note.start
+        );
+
+        // longEnd を探す
+        const endNote = notes.find(n =>
+            n.type === "longEnd" &&
+            n.lane === note.lane &&
+            n.end === note.end
+        );
+
+        if (!startNote || !endNote) return;
+
+        // longBar が判定円付近に来たら押しっぱなし判定
+        const diff = Math.abs(note.y - judgeLineY);
+
+        if (diff < 40) {  // ← 判定範囲は狭くする（巻き込み防止）
+
+            const isPressed =
+                (note.lane === "left"  && leftPressed) ||
+                (note.lane === "right" && rightPressed);
+
+            if (!isPressed) {
+                // 押していない → Bad
+                lastJudgeText = "Bad!";
+                lastJudgeTimer = 60;
+                lastJudgeLane = note.lane;
+                judgeTextScale = 10;
+
+                if (note.lane === "left") {
+                    lastJudgeColorLeft = judgeColors["Bad!"];
+                    judgeFlashLeft = judgeScaleLeft = judgeWaveLeft = 10;
+                } else {
+                    lastJudgeColorRight = judgeColors["Bad!"];
+                    judgeFlashRight = judgeScaleRight = judgeWaveRight = 10;
+                }
+
+                life -= 20;
+                if (life <= 0) {
+                    life = 0;
+                    gameOver = true;
+                    bgm.pause();
+                    bgm.currentTime = 0;
+                    gameState = "result";
+                }
+            }
+
+            // longBar は判定済みにしない（通過中ずっとチェックする）
+        }
     }
+});
+
 }
+
 /* ============================================================
-   描画処理
+   描画処理（return を使わない）
 ============================================================ */
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (gameState === "title") return drawTitle();
-    if (gameState === "selectSong") return drawSongSelect();
-    if (gameState === "selectDifficulty") return drawDifficultySelect();
-    if (gameState === "play") return drawPlay();
-    if (gameState === "result") return drawResult();
+    if (gameState === "title") {
+        drawTitle();
+    } else if (gameState === "selectSong") {
+        drawSongSelect();
+    } else if (gameState === "selectDifficulty") {
+        drawDifficultySelect();
+    } else if (gameState === "play") {
+        drawPlay();
+    } else if (gameState === "result") {
+        drawResult();
+    }
 }
 
 /* ------------------------------
@@ -553,7 +732,7 @@ function drawSongSelect() {
 }
 
 /* ------------------------------
-   難易度選択（Easy / Hard）
+   難易度選択画面
 ------------------------------ */
 function drawDifficultySelect() {
     ctx.fillStyle = "black";
@@ -563,7 +742,7 @@ function drawDifficultySelect() {
     ctx.font = "48px sans-serif";
     ctx.fillText("Select Difficulty", canvas.width/2 - 180, 120);
 
-    const diffNames = ["Easy", "Hard"];  // ★2種類に変更
+    const diffNames = ["Easy", "Hard"];
     ctx.font = "32px sans-serif";
 
     diffNames.forEach((name, i) => {
@@ -573,7 +752,7 @@ function drawDifficultySelect() {
 }
 
 /* ============================================================
-   判定円描画（光・拡大・波紋・色）
+   判定円描画
 ============================================================ */
 function drawJudgeCircle(x, y, flash, scale, wave, color) {
     const baseRadius = 35;
@@ -606,6 +785,49 @@ function drawJudgeCircle(x, y, flash, scale, wave, color) {
     }
 }
 
+/* ============================================================
+   長押し棒描画
+============================================================ */
+function drawLongBar(note) {
+
+    // longStart を探す
+    const startNote = notes.find(n =>
+        n.type === "longStart" &&
+        n.lane === note.lane &&
+        n.time === note.start
+    );
+
+    // longEnd を探す
+    const endNote = notes.find(n =>
+        n.type === "longEnd" &&
+        n.lane === note.lane &&
+        n.time === note.end
+    );
+
+    if (!startNote || !endNote) return;
+
+    const startY = startNote.y;
+    const endY = endNote.y;
+
+    const grad = ctx.createLinearGradient(
+        laneX[note.lane], startY,
+        laneX[note.lane], endY
+    );
+
+    grad.addColorStop(0.00, "rgba(0,255,255,0.8)");
+    grad.addColorStop(0.50, "rgba(0,180,255,0.6)");
+    grad.addColorStop(1.00, "rgba(0,120,255,0.4)");
+
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 14;
+
+    ctx.beginPath();
+    ctx.moveTo(laneX[note.lane], startY);
+    ctx.lineTo(laneX[note.lane], endY);
+    ctx.stroke();
+}
+
+
 /* ------------------------------
    プレイ画面
 ------------------------------ */
@@ -616,19 +838,16 @@ function drawPlay() {
     ctx.strokeStyle = "rgba(255,255,255,0.3)";
     ctx.lineWidth = 2;
 
-    // 左レーン線
     ctx.beginPath();
     ctx.moveTo(laneX.left, 0);
     ctx.lineTo(laneX.left, judgeLineY);
     ctx.stroke();
 
-    // 右レーン線
     ctx.beginPath();
     ctx.moveTo(laneX.right, 0);
     ctx.lineTo(laneX.right, judgeLineY);
     ctx.stroke();
 
-    // 判定円（左）
     drawJudgeCircle(
         laneX.left,
         judgeLineY,
@@ -638,7 +857,6 @@ function drawPlay() {
         lastJudgeColorLeft
     );
 
-    // 判定円（右）
     drawJudgeCircle(
         laneX.right,
         judgeLineY,
@@ -652,6 +870,11 @@ function drawPlay() {
     notes.forEach(note => {
         if (!note.active) return;
         if (note.judged && note.y > judgeLineY + 120) return;
+
+        if (note.type === "longBar") {
+            drawLongBar(note);
+            return;
+        }
 
         const size = 60;
         const img = (note.lane === "left") ? ghostLeftImg : ghostRightImg;
@@ -675,17 +898,12 @@ function drawPlay() {
         ctx.stroke();
     });
 
-    /* スコア */
     ctx.fillStyle = "white";
     ctx.font = "24px sans-serif";
     ctx.fillText(`Score: ${score}`, 20, 40);
 
-    /* コンボ */
-    ctx.fillStyle = "white";
-    ctx.font = "24px sans-serif";
     ctx.fillText(`Combo: ${combo}`, 20, 80);
 
-    /* ★ライフゲージ */
     ctx.fillStyle = "white";
     ctx.font = "20px sans-serif";
     ctx.fillText(`LIFE`, 20, 150);
@@ -696,7 +914,6 @@ function drawPlay() {
     ctx.fillStyle = "lime";
     ctx.fillRect(20, 170, 200 * (life / 100), 20);
 
-    /* ★判定文字（判定円と同じ色） */
     if (lastJudgeTimer > 0) {
         const scale = 1 + judgeTextScale * 0.1;
 
@@ -716,14 +933,13 @@ function drawPlay() {
         ctx.restore();
     }
 
-    /* 時間表示 */
     ctx.fillStyle = "gray";
     ctx.font = "16px sans-serif";
     ctx.fillText(`Time: ${gameTime.toFixed(2)}s`, 20, 110);
 }
 
 /* ------------------------------
-   リザルト画面（GAME OVER 対応）
+   リザルト画面
 ------------------------------ */
 function drawResult() {
     ctx.fillStyle = "black";
@@ -742,7 +958,7 @@ function drawResult() {
 }
 
 /* ============================================================
-   メインループ
+   メインループ（画面遷移バグ修正済）
 ============================================================ */
 function loop() {
     update();

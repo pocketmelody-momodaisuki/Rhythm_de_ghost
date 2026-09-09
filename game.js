@@ -108,7 +108,7 @@ const songs = [
         title: "Ghost Waltz",
         file: "music1.mp3",
         bpm: 152,
-        length: 110
+        length: 108
     },
     {
         title: "Haunted Beat",

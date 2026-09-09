@@ -1,6 +1,7 @@
 /* ============================================================
    Rhythm de Ghost - BPM Auto Chart Version + Life Gauge
-   難易度：Easy / Hard（旧 Normal の密度を Hard に）
+   ★長押しなし・安定版（勝手にMISSが出る問題修正）
+   ★同時押しライン対応
 ============================================================ */
 
 /* ------------------------------
@@ -8,8 +9,6 @@
 ------------------------------ */
 const isiPhone = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 if (isiPhone) {
-    document.addEventListener("touchmove", e => e.preventDefault(), { passive: false });
-    document.addEventListener("touchstart", e => e.preventDefault(), { passive: false });
     document.body.style.overflow = "hidden";
 }
 
@@ -92,8 +91,7 @@ const judgeColors = {
 };
 
 /* ------------------------------
-   難易度設定（2種類）
-   Hard = 旧 Normal の密度（0.5）
+   難易度設定
 ------------------------------ */
 const difficultySettings = {
     easy:   1.0,
@@ -104,18 +102,8 @@ const difficultySettings = {
    曲データ
 ------------------------------ */
 const songs = [
-    {
-        title: "Ghost Waltz",
-        file: "music1.mp3",
-        bpm: 152,
-        length: 110
-    },
-    {
-        title: "Haunted Beat",
-        file: "music2.mp3",
-        bpm: 77,
-        length: 90
-    }
+    { title: "Ghost Waltz", file: "music1.mp3", bpm: 152, length: 110 },
+    { title: "Haunted Beat", file: "music2.mp3", bpm: 77, length: 90 }
 ];
 
 /* ------------------------------
@@ -127,8 +115,8 @@ let score = 0;
 let combo = 0;
 let maxCombo = 0;
 
-let life = 100;        // ★体力ゲージ
-let gameOver = false;  // ★ゲームオーバー判定
+let life = 100;
+let gameOver = false;
 
 let lastJudgeText = "";
 let lastJudgeTimer = 0;
@@ -146,25 +134,55 @@ let judgeWaveRight = 0;
 let judgeTextScale = 0;
 
 let noteBursts = [];
+
 /* ============================================================
-   BPM → ノーツ自動生成（Easy / Hard）
+   BPM → ノーツ自動生成（同時押し・階段・2連打対応）
 ============================================================ */
 function generateChartFromBPM(bpm, songLength, difficulty) {
     const beatSec = 60 / bpm;
-    const interval = beatSec * difficultySettings[difficulty];  
+    const interval = beatSec * difficultySettings[difficulty];
     const chart = [];
 
     let t = 0;
     while (t < songLength) {
-        const lane = Math.random() < 0.5 ? "left" : "right";
-        chart.push({ time: t, lane });
+
+        const r = Math.random();
+
+        /* ★ 10%：同時押し */
+        if (r < 0.10) {
+            chart.push({ time: t, lane: "left" });
+            chart.push({ time: t, lane: "right" });
+        }
+
+        /* ★ 10%：階段（左→右→左→右） */
+        else if (r < 0.20) {
+            chart.push({ time: t,       lane: "left" });
+            chart.push({ time: t + 0.1, lane: "right" });
+            chart.push({ time: t + 0.2, lane: "left" });
+            chart.push({ time: t + 0.3, lane: "right" });
+        }
+
+        /* ★ 10%：2連打 */
+        else if (r < 0.30) {
+            const lane = Math.random() < 0.5 ? "left" : "right";
+            chart.push({ time: t,       lane });
+            chart.push({ time: t + 0.12, lane });
+        }
+
+        /* ★ 通常ノーツ */
+        else {
+            const lane = Math.random() < 0.5 ? "left" : "right";
+            chart.push({ time: t, lane });
+        }
+
         t += interval;
     }
+
     return chart;
 }
 
 /* ============================================================
-   判定処理（ライフ増減を含む）
+   判定処理（ライフ増減）
 ============================================================ */
 function handleInput(lane) {
     if (gameState !== "play") return;
@@ -172,7 +190,6 @@ function handleInput(lane) {
     let bestNote = null;
     let bestDiff = Infinity;
 
-    // 最も近いノーツを探す
     notes.forEach(note => {
         if (note.lane !== lane) return;
         if (!note.active) return;
@@ -192,7 +209,6 @@ function handleInput(lane) {
 
     if (!bestNote) return;
 
-    /* 判定判定 */
     let judge = "Miss!";
     let addScore = 0;
 
@@ -211,81 +227,52 @@ function handleInput(lane) {
     lastJudgeText = judge;
     lastJudgeTimer = 60;
     lastJudgeLane = lane;
-
     judgeTextScale = 10;
 
-    /* 判定円の色を保存（判定文字の色に使う） */
     if (lane === "left") {
         lastJudgeColorLeft = judgeColors[judge];
-        judgeFlashLeft = 10;
-        judgeScaleLeft = 10;
-        judgeWaveLeft = 10;
+        judgeFlashLeft = judgeScaleLeft = judgeWaveLeft = 10;
     } else {
         lastJudgeColorRight = judgeColors[judge];
-        judgeFlashRight = 10;
-        judgeScaleRight = 10;
-        judgeWaveRight = 10;
+        judgeFlashRight = judgeScaleRight = judgeWaveRight = 10;
     }
 
-    /* 爆発エフェクト */
-    noteBursts.push({
-        x: laneX[lane],
-        y: judgeLineY,
-        timer: 10
-    });
+    noteBursts.push({ x: laneX[lane], y: judgeLineY, timer: 10 });
 
-    /* ============================================================
-       ★ ライフゲージ増減
-    ============================================================ */
-    if (judge === "Perfect!") {
-        life += 2;
-    } else if (judge === "Great!") {
-        // ±0
-    } else if (judge === "Good!") {
-        life -= 10;
-    } else if (judge === "Bad!") {
-        life -= 20;
-    } else if (judge === "Miss!") {
-        life -= 30;
-    }
+    if (judge === "Perfect!") life += 2;
+    else if (judge === "Good!") life -= 10;
+    else if (judge === "Bad!") life -= 20;
+    else if (judge === "Miss!") life -= 30;
 
-    /* コンボ継続ボーナス（Perfect / Great のときのみ） */
     if (judge === "Perfect!" || judge === "Great!") {
         combo++;
-        life += 1;  // コンボボーナス
-        if (combo > maxCombo) maxCombo = combo;
+        life += 1;
+        maxCombo = Math.max(maxCombo, combo);
     } else {
         combo = 0;
     }
 
-    /* ライフ上限 */
     if (life > 100) life = 100;
 
-/* ★ ライフが0以下ならゲームオーバー */
     if (life <= 0) {
         life = 0;
         gameOver = true;
-
-        /* ★ 曲を止める（重要） */
         bgm.pause();
         bgm.currentTime = 0;
-
         gameState = "result";
     }
-
 }
+
 /* ============================================================
    入力処理（キーボード）
 ============================================================ */
 document.addEventListener("keydown", e => {
 
-    /* タイトル → 曲選択 */
     if (gameState === "title") {
         gameState = "selectSong";
         return;
     }
 
-    /* 曲選択 */
     if (gameState === "selectSong") {
         if (e.code === "ArrowUp") selectSongCursor = Math.max(0, selectSongCursor - 1);
         if (e.code === "ArrowDown") selectSongCursor = Math.min(songs.length - 1, selectSongCursor + 1);
@@ -297,7 +284,6 @@ document.addEventListener("keydown", e => {
         return;
     }
 
-    /* 難易度選択（Easy / Hard） */
     if (gameState === "selectDifficulty") {
         if (e.code === "ArrowUp") selectDifficultyCursor = Math.max(0, selectDifficultyCursor - 1);
         if (e.code === "ArrowDown") selectDifficultyCursor = Math.min(1, selectDifficultyCursor + 1);
@@ -309,29 +295,20 @@ document.addEventListener("keydown", e => {
         return;
     }
 
-    /* プレイ中の判定入力 */
     if (gameState === "play") {
         if (e.code === "Space") handleInput("left");
         if (e.code === "Enter") handleInput("right");
     }
 
-    /* リザルト → タイトルへ */
     if (gameState === "result") {
-
-        /* ★ 判定色リセット */
         lastJudgeColorLeft = "white";
         lastJudgeColorRight = "white";
-
-        /* ★ 判定文字リセット */
         lastJudgeText = "";
         lastJudgeTimer = 0;
         judgeTextScale = 0;
-
         gameState = "title";
     }
-
 });
-
 /* ============================================================
    pointer入力（スマホ／PCクリック）
 ============================================================ */
@@ -407,11 +384,9 @@ function startGame(difficulty) {
 
     gameTime = 0;
 
-    /* ★ 判定円の色を白にリセット */
     lastJudgeColorLeft = "white";
     lastJudgeColorRight = "white";
 
-    /* ★ 判定文字もリセット */
     lastJudgeText = "";
     lastJudgeTimer = 0;
     judgeTextScale = 0;
@@ -419,92 +394,84 @@ function startGame(difficulty) {
     gameState = "play";
 }
 
-
 /* ============================================================
-   更新処理
+   更新処理（★勝手にMISSが出る問題の修正含む）
 ============================================================ */
 function update() {
-    if (gameState === "play") {
+    if (gameState !== "play") return;
 
-        gameTime = bgm.currentTime;
+    gameTime = bgm.currentTime;
 
-        /* 曲終了 → リザルトへ */
-        if (bgm.ended) {
-            gameState = "result";
-            return;
+    /* 曲終了 → リザルトへ */
+    if (bgm.ended) {
+        gameState = "result";
+        return;
+    }
+
+    notes.forEach(note => {
+
+        /* ★出現タイミングを 1.0秒 → 0.5秒前 に修正 */
+        if (!note.active && gameTime >= note.time - 0.5) {
+            note.active = true;
+            note.y = -50;
         }
 
-        /* ノーツ落下処理 */
-        notes.forEach(note => {
+        if (note.active && !note.judged) {
 
-            /* 判定ラインに近づいたら active にする */
-            if (!note.active && gameTime >= note.time - 1.0) {
-                note.active = true;
-                note.y = -50;
+            /* ★落下速度を 4px → 3px に修正 */
+            note.y += 3;
+
+            /* 判定ラインを過ぎたら Miss */
+            if (note.y > judgeLineY + 120) {
+                note.judged = true;
+
+                lastJudgeText = "Miss!";
+                lastJudgeTimer = 60;
+                lastJudgeLane = note.lane;
+                judgeTextScale = 10;
+
+                /* ★ 左判定円が消える問題の修正：Missでも白に戻す */
+                if (note.lane === "left") {
+                    lastJudgeColorLeft = "white";
+                    judgeFlashLeft = judgeScaleLeft = judgeWaveLeft = 10;
+                } else {
+                    lastJudgeColorRight = "white";
+                    judgeFlashRight = judgeScaleRight = judgeWaveRight = 10;
+                }
+
+                life -= 15;
+
+                if (life <= 0) {
+                    life = 0;
+                    gameOver = true;
+
+                    bgm.pause();
+                    bgm.currentTime = 0;
+
+                    gameState = "result";
+                }
             }
+        }
+    });
 
-            /* 落下 */
-            if (note.active && !note.judged) {
-                note.y += 4;
+    /* 判定エフェクトの減衰 */
+    if (lastJudgeTimer > 0) lastJudgeTimer--;
 
-                /* 判定ラインを過ぎたら Miss 扱い */
-                if (note.y > judgeLineY + 120) {
-                    note.judged = true;
+    judgeFlashLeft = Math.max(0, judgeFlashLeft - 1);
+    judgeFlashRight = Math.max(0, judgeFlashRight - 1);
+    judgeScaleLeft = Math.max(0, judgeScaleLeft - 1);
+    judgeScaleRight = Math.max(0, judgeScaleRight - 1);
+    judgeWaveLeft = Math.max(0, judgeWaveLeft - 1);
+    judgeWaveRight = Math.max(0, judgeWaveRight - 1);
 
-                        /* ★ MISS 判定文字を出す */
-                        lastJudgeText = "Miss!";
-                        lastJudgeTimer = 60;
-                        lastJudgeLane = note.lane;  // 左右どちらのレーンでMISSしたか
-                        judgeTextScale = 10;
+    /* 爆発エフェクト */
+    noteBursts.forEach(b => b.timer--);
+    noteBursts = noteBursts.filter(b => b.timer > 0);
 
-                        /* ★ 判定円の色もMiss色にする */
-                        if (note.lane === "left") {
-                            lastJudgeColorLeft = judgeColors["Miss!"];
-                            judgeFlashLeft = 10;
-                            judgeScaleLeft = 10;
-                            judgeWaveLeft = 10;
-                        } else {
-                            lastJudgeColorRight = judgeColors["Miss!"];
-                            judgeFlashRight = 10;
-                            judgeScaleRight = 10;
-                            judgeWaveRight = 10;
-                        }
-
-                        /* ★ MISSダメージ */
-                        life -= 15;
-
-                        if (life <= 0) {
-                            life = 0;
-                            gameOver = true;
-
-                            bgm.pause();
-                            bgm.currentTime = 0;
-
-                            gameState = "result";
-                        }
-                    }
-                                    
-            }
-        });
-
-        /* 判定エフェクトの減衰 */
-        if (lastJudgeTimer > 0) lastJudgeTimer--;
-
-        judgeFlashLeft = Math.max(0, judgeFlashLeft - 1);
-        judgeFlashRight = Math.max(0, judgeFlashRight - 1);
-        judgeScaleLeft = Math.max(0, judgeScaleLeft - 1);
-        judgeScaleRight = Math.max(0, judgeScaleRight - 1);
-        judgeWaveLeft = Math.max(0, judgeWaveLeft - 1);
-        judgeWaveRight = Math.max(0, judgeWaveRight - 1);
-
-        /* 爆発エフェクト */
-        noteBursts.forEach(b => b.timer--);
-        noteBursts = noteBursts.filter(b => b.timer > 0);
-
-        /* 判定文字の縮小 */
-        judgeTextScale = Math.max(0, judgeTextScale - 1);
-    }
+    /* 判定文字の縮小 */
+    judgeTextScale = Math.max(0, judgeTextScale - 1);
 }
+
 /* ============================================================
    描画処理
 ============================================================ */
@@ -563,7 +530,7 @@ function drawDifficultySelect() {
     ctx.font = "48px sans-serif";
     ctx.fillText("Select Difficulty", canvas.width/2 - 180, 120);
 
-    const diffNames = ["Easy", "Hard"];  // ★2種類に変更
+    const diffNames = ["Easy", "Hard"];
     ctx.font = "32px sans-serif";
 
     diffNames.forEach((name, i) => {
@@ -571,7 +538,6 @@ function drawDifficultySelect() {
         ctx.fillText(`${i+1}. ${name}`, canvas.width/2 - 150, 220 + i*60);
     });
 }
-
 /* ============================================================
    判定円描画（光・拡大・波紋・色）
 ============================================================ */
@@ -606,9 +572,9 @@ function drawJudgeCircle(x, y, flash, scale, wave, color) {
     }
 }
 
-/* ------------------------------
+/* ============================================================
    プレイ画面
------------------------------- */
+============================================================ */
 function drawPlay() {
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -616,19 +582,19 @@ function drawPlay() {
     ctx.strokeStyle = "rgba(255,255,255,0.3)";
     ctx.lineWidth = 2;
 
-    // 左レーン線
+    /* 左レーン線 */
     ctx.beginPath();
     ctx.moveTo(laneX.left, 0);
     ctx.lineTo(laneX.left, judgeLineY);
     ctx.stroke();
 
-    // 右レーン線
+    /* 右レーン線 */
     ctx.beginPath();
     ctx.moveTo(laneX.right, 0);
     ctx.lineTo(laneX.right, judgeLineY);
     ctx.stroke();
 
-    // 判定円（左）
+    /* 判定円（左） */
     drawJudgeCircle(
         laneX.left,
         judgeLineY,
@@ -638,7 +604,7 @@ function drawPlay() {
         lastJudgeColorLeft
     );
 
-    // 判定円（右）
+    /* 判定円（右） */
     drawJudgeCircle(
         laneX.right,
         judgeLineY,
@@ -665,6 +631,29 @@ function drawPlay() {
         );
     });
 
+    /* ★ 同時押しノーツを線で結ぶ */
+    for (let i = 0; i < notes.length; i++) {
+        const n1 = notes[i];
+        if (!n1.active || n1.judged) continue;
+
+        for (let j = i + 1; j < notes.length; j++) {
+            const n2 = notes[j];
+            if (!n2.active || n2.judged) continue;
+
+            // ★ 同時押し判定：time が同じ & 左右
+            if (n1.time === n2.time && n1.lane !== n2.lane) {
+
+                ctx.strokeStyle = "rgba(255,255,255,0.5)";
+                ctx.lineWidth = 4;
+
+                ctx.beginPath();
+                ctx.moveTo(laneX[n1.lane], n1.y);
+                ctx.lineTo(laneX[n2.lane], n2.y);
+                ctx.stroke();
+            }
+        }
+    }
+
     /* 爆発エフェクト */
     noteBursts.forEach(b => {
         const r = (10 - b.timer) * 4;
@@ -685,7 +674,7 @@ function drawPlay() {
     ctx.font = "24px sans-serif";
     ctx.fillText(`Combo: ${combo}`, 20, 80);
 
-    /* ★ライフゲージ */
+    /* ライフゲージ */
     ctx.fillStyle = "white";
     ctx.font = "20px sans-serif";
     ctx.fillText(`LIFE`, 20, 150);
@@ -696,7 +685,7 @@ function drawPlay() {
     ctx.fillStyle = "lime";
     ctx.fillRect(20, 170, 200 * (life / 100), 20);
 
-    /* ★判定文字（判定円と同じ色） */
+    /* 判定文字 */
     if (lastJudgeTimer > 0) {
         const scale = 1 + judgeTextScale * 0.1;
 
@@ -722,23 +711,31 @@ function drawPlay() {
     ctx.fillText(`Time: ${gameTime.toFixed(2)}s`, 20, 110);
 }
 
-/* ------------------------------
-   リザルト画面（GAME OVER 対応）
------------------------------- */
+/* ============================================================
+   リザルト画面
+============================================================ */
 function drawResult() {
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.fillStyle = gameOver ? "red" : "white";
     ctx.font = "64px sans-serif";
-    ctx.fillText(gameOver ? "GAME OVER" : "RESULT", canvas.width/2 - 200, 150);
+    ctx.fillText(
+        gameOver ? "GAME OVER" : "RESULT",
+        canvas.width/2 - 200,
+        150
+    );
 
     ctx.font = "32px sans-serif";
     ctx.fillStyle = "white";
     ctx.fillText(`Score: ${score}`, canvas.width/2 - 150, 260);
     ctx.fillText(`Max Combo: ${maxCombo}`, canvas.width/2 - 150, 320);
 
-    ctx.fillText("Tap / Press Space to return to Title", canvas.width/2 - 300, 420);
+    ctx.fillText(
+        "Tap / Press Space to return to Title",
+        canvas.width/2 - 300,
+        420
+    );
 }
 
 /* ============================================================

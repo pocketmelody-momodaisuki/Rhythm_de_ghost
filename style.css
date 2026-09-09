@@ -11,7 +11,7 @@ canvas {
   display: block;
 }
 
-/* PC */
+/* PC用 */
 @media (min-width: 800px) {
   canvas {
     width: 1200px;
@@ -20,10 +20,16 @@ canvas {
   }
 }
 
-/* iPhone / iPad */
+/* iPhone / iPad 用 */
 @media (max-width: 799px) {
+  html, body {
+    overscroll-behavior: none;
+    overflow: hidden;
+    touch-action: none;
+  }
+
   canvas {
-    width: 100vw;
-    height: 50vw; /* 縦向き */
+    width: 60vw;
+    height: 30vw; /* 1200x600 の比率（2:1） */
   }
 }
